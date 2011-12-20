@@ -1,0 +1,77 @@
+Minecraft Server Script v0.1
+Leander Hutton
+leander@one-button.org
+
+INTRO:
+
+USE THIS SOFTWARE AT YOUR OWN RISK.  THIS SCRIPT IS NOT WARRANTIED TO WORK PROPERLY OR AT ALL.  WILL NOT ANY ORGANS LARGER.  MAY ACCIDENTALLY ALL THE THINGS.
+
+This script was written to make managing a Minecraft server a little easier.  It's been changed/revised and updated over the months and it currently supports running a server from a physical disk or a RAM disk and making regular backups.    
+
+This script is designed to work like a typical init.d script but can be run in any environment you see fit, such as Mac OS X.  You only have to have the requirements below.  
+
+REQUIREMENTS:
+
+bash
+JRE
+Mojang's official minecraft_serer.jar or CraftBukkit's latest recommended release. 
+GNU Screen
+pgrep
+rsync
+GNU tar
+An obsession with breaking blocks
+An understanding significant other
+Lots of free time
+
+USAGE:
+
+minecraft-server {start|restart|save-all|backup|writetodisk|stop}
+
+start: starts the Minecraft server.
+restart: shuts down and starts the server. Disconnects any connected clients. 
+save-all: saves all of the map data to disk.
+backup: creates date-stamped gzipped tarball backup of the server into the backup directory. 
+writetodsik: writes data in RAM disk to disk.  Only works if you're using RAM disk.
+stop: stops the server.  Disconnects any connected clients. 
+
+MAKE SURE YOU EDIT THESE SETTINGS AT THE TOP OF THE SCRIPT:
+
+MINECRAFT="minecraft_server.jar" # Name of your server jar file.  This script supports vanilla and craftbukkit.
+MCPATH="/path/to/mc/server/" # Directory on disk of your MC server. Make sure your MINECRAFT jar file is located here.
+ARGS="-Xmx1024M -Xms1024M -jar" # Standard arguments for the minecraft server jar.  
+USER="steve" # User your minecraft server runs under.
+BACKUPDIR="/path/to/backups/" # Directory for backup tar files.
+
+The defaults will not work.  Make sure the programs referenced by the script are in the appropriate location.  You may need to change those too.  The script has been setup for use on Debian out of the box.
+
+RECOMMENDED CRON TASKS:
+
+It is recommended that you add a few cron jobs to the user running the Minecraft server.  These are for saving the map and doing backups.  Here are some example entries for your crontab:
+
+# Save map to disk every 30 minutes
+*/30	*	*	*	*	/etc/init.d/minecraft-server save-all $>/dev/null
+# Do a complete backup every 6 hours
+15	*/6	*	*	*	/etc/init.d/minecraft-server backup $>/dev/null
+
+You might want to keep an eye on your backup directory as if may fill up quickly if you have frequent backups or a large map.  The next version of this script should have the ability to only keep the last X number of backups. 
+
+RAM DISK:
+
+If you're using a Linux host you can create a tmpfs out of RAM and mount it like so:
+
+mkdir /var/ramdisk
+mount -t tmpfs none /var/ramdisk -o size=512m
+
+If you want the tmpfs setup automatically on boot at the following line to /etc/fstab:
+
+tmpfs		/var/ramdisk	tmpfs	defaults,size=512m	0	0
+
+Here the size option is specified in megabytes.  Make sure you create a disk with plenty of room for your map to grow.
+
+WARNING:  tmpfs contents are COMPLETELY DESTROYED on shutdown or power loss. PLEASE USE A UPS AND DO SOME SORT OF SYNCING TO DISK!
+
+To use this script with a RAM disk set the RAMDRIVE variable to true and set RAMDISKDIR to the tmpfs' mount point.  You can also use this script to sync the RAM disk to a hard drive. The directory it syncs to is set by the MCPATH variable.  Add the following line to your crontab to get the disk sync going every ten minutes:
+
+*/10	*	*	*	*	/etc/init.d/minecraft-server writetodisk $>/dev/null
+
+If RAMDISK="true" is set the script will load up the files into the tmpfs on startup and back out of the tmpfs on shutdown automatically.  If it's set to false it will just run from the disk (MCPATH) like normal. 

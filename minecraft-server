@@ -1,0 +1,243 @@
+#!/bin/bash
+
+# Minecraft server script
+# v0.1 
+# leander@one-button.org
+
+# User editable variables:
+# Always include the trailing slashes on directories!
+MINECRAFT="minecraft_server.jar" # Name of your server jar file.  This script supports vanilla and craftbukkit.
+MCPATH="/path/to/mc/server/" # Directory on disk of your MC server. Make sure your MINECRAFT jar file is located here.
+ARGS="-Xmx1024M -Xms1024M -jar" # Standard arguments for the minecraft server jar.  
+USER="steve" # User your minecraft server runs under.
+BACKUPDIR="/path/to/backups/" # Directory for backup tar files.
+
+# Various programs this script calls
+# Setup for Debian by default, you may need to update the location of these for other distros.
+JAVA="/usr/bin/java"
+SCREEN="/usr/bin/screen"
+DATE=`date +%m-%d-%Y-%H:%M`
+TAR="/bin/tar"
+RSYNC="/usr/bin/rsync"
+
+# RAM Disk settings.  
+# Don't use this if you don't know what you're doing!
+# See the README for me info
+RAMDISK=false # Set to true if you want to use a RAM disk, false to run from a hard disk.  See README first.
+RAMDISKDIR="/path/to/ramdisk/" # The path where your RAM disk is mounted. 
+
+already_running(){
+
+	if pgrep -u $USER -f $MINECRAFT >  /dev/null
+	then
+		return 1
+	else
+		return 0
+	fi
+}
+
+run_as() {
+
+	WHOAMI=`whoami`
+
+	if [ "$WHOAMI" == "$USER" ]
+	then
+		bash -c "$1"
+	else
+		su  - $USER -c "$1"
+	fi
+
+}
+
+start() {
+	
+	already_running
+
+	if [ "$?" == "1" ]  
+	then
+		echo "Minecraft already running ..."
+	else
+		if [ $RAMDISK == "true" ]
+		then
+			echo "Copying files to RAM Disk ..."
+			setup_ramdisk
+			echo "Starting $MINECRAFT ..."
+			run_as "cd $RAMDISKDIR && $SCREEN -dm -S minecraft $JAVA $ARGS $MINECRAFT"
+			sleep 7
+		else
+
+			echo "Starting $MINECRAFT ..."
+			run_as "cd $MCPATH && $SCREEN -dm -S minecraft $JAVA $ARGS $MINECRAFT"
+			sleep 7
+		fi
+	
+		already_running 
+			if [ "$?" == "1" ]
+			then
+				echo "$MINECRAFT started."
+			else
+				echo "Error, $MINECRAFT could not be started.  Check ${MCPATH}server.log for errors."
+			fi
+
+	fi
+}
+
+
+stop() {
+	
+	already_running
+	if [ "$?" == "1" ]
+	then
+		if [ $RAMDISK == "true" ]
+		then
+		
+		echo "Syncing RAM drive to disk .."
+		sync_ram_to_disk
+		echo "Sync complete."
+
+	fi
+		echo "Stopping $MINECRAFT ... "
+		run_as "$SCREEN -p 0 -S minecraft -X stuff \"say SERVER SHUT DOWN IN 5 SECONDS.  SAVING WORLD ...\"`echo -ne '\015'`"
+		run_as "$SCREEN -p 0 -S minecraft -X eval 'stuff save-all\015'"
+		sleep 5
+		run_as "$SCREEN -p 0 -S minecraft -X eval 'stuff stop\015'"
+		sleep 2
+		already_running
+			if [ "$?" == "1" ]
+			then
+				echo "$MINECRAFT could not be stopped."
+				echo "Check ${MCPATH}server.log for errors."
+			else
+				echo "$MINECRAFT stopped."
+			fi
+
+	else
+		echo "$MINECRAFT is not running"
+	fi
+}
+
+status() {
+
+	already_running
+	if [ "$?" == "1" ]
+	then
+		echo "$MINECRAFT is running."
+	else
+		echo "$MINECRAFT is not running."
+	fi
+}
+
+save_all() {
+
+	already_running
+	if [ "$?" == "1" ]
+	then
+		echo "Saving all in memory to disk ..."
+		run_as "$SCREEN -p 0 -S minecraft -X stuff \"say SAVING WORLD.  PREPARE FOR LAG.\"`echo -ne '\015'`"
+		run_as "$SCREEN -p 0 -S minecraft -X eval 'stuff save-all\015'"
+		sleep 10
+		run_as "$SCREEN -p 0 -S minecraft -X stuff \"say SAVE COMPLETE.\"`echo -ne '\015'`"
+	else
+		echo "$MINECRAFT not running."
+				
+	fi
+
+
+
+}
+
+backup() {
+	already_running
+	if [ "$?" == "1" ]
+	then
+		if [ "$RAMDISK" == "true" ]
+		then
+			echo "Syncing RAM drive to disk .."
+			sync_ram_to_disk
+			echo "Sync complete."
+		fi
+
+		echo "Backing up server ..."
+		if [ -d $BACKUPDIR ]
+		then
+			run_as "$SCREEN -p 0 -S minecraft -X stuff \"say BACKING UP.  SERVER GOING READ-ONLY.\"`echo -ne '\015'`"
+			run_as "$SCREEN -p 0 -S minecraft -X eval 'stuff save-off\015'"	
+			run_as "$TAR czf ${BACKUPDIR}minecraft-server-${DATE}.tar.gz $MCPATH"
+			run_as "$SCREEN -p 0 -S minecraft -X eval 'stuff save-on\015'"	
+			run_as "$SCREEN -p 0 -S minecraft -X stuff \"say BACK UP COMPLETE.  SERVER GOING READ-WRITE.\"`echo -ne '\015'`"
+			
+			echo "Backup complete."
+		else
+			echo "Error, backup directory not found."
+		fi
+	else
+			run_as "$TAR czf ${BACKUPDIR}minecraft-server-${DATE}.tar.gz $MCPATH"
+			echo "Backup complete."		
+	fi
+
+}
+
+setup_ramdisk() {
+		echo "You are setup to run in a RAM disk."
+		echo "PLEASE see the README about syncing the RAM drive with a hard drive!"
+		run_as "$RSYNC -art --delete-after $MCPATH $RAMDISKDIR"
+}
+
+sync_ram_to_disk() {
+	
+	if [ -f $RAMDISKDIR/${MINECRAFT} ]
+	then
+
+		echo "Syncing RAM disk to drive ..."
+		run_as "$SCREEN -p 0 -S minecraft -X eval 'stuff save-off\015'"	
+		run_as "$SCREEN -p 0 -S minecraft -X eval 'stuff save-all\015'"
+		sleep 2
+		run_as "$RSYNC -art --delete-after $RAMDISKDIR $MCPATH"
+		run_as "$SCREEN -p 0 -S minecraft -X eval 'stuff save-on\015'"
+		echo "Sync complete."
+
+	else
+		echo "Error, $MINECRAFT not in RAM disk."
+	fi
+}
+
+case $1 in
+	start)
+		start
+		exit 1
+		;;
+	stop)
+		stop
+		exit 1
+		;;
+	
+	save-all)
+		save_all
+		exit 1
+		;;
+
+	backup)
+		save_all
+		backup
+		exit 1
+		;;
+	status)
+		status
+		exit 1
+		;;
+	writetodisk)
+		sync_ram_to_disk
+		exit 1
+		;;
+	restart)
+		stop
+		start
+		exit 1
+		;;
+	*)
+		echo "Usage: minecraft-server {start|restart|save-all|backup|writetodisk|stop}"
+		exit 1
+		;;
+esac
+
+exit 0 
